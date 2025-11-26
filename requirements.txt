@@ -1,0 +1,30 @@
+# FastAPI 및 웹 서버
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+python-multipart==0.0.6
+
+# 데이터 검증
+pydantic==2.5.3
+pydantic-settings==2.1.0
+
+# 임베딩 모델
+sentence-transformers==2.3.1
+transformers==4.37.2
+
+# PyTorch (CUDA 12.1 지원, RTX 5090 sm_120 지원)
+torch==2.9.1
+torchvision==0.24.1
+torchaudio==2.9.1
+
+# Qdrant 클라이언트
+qdrant-client==1.16.0
+grpcio==1.60.0
+grpcio-tools==1.60.0
+
+# HTTP 클라이언트
+httpx==0.26.0
+
+# 유틸리티
+numpy==1.26.3
+scipy==1.11.4
+python-dotenv==1.0.0

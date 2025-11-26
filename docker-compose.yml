@@ -1,0 +1,48 @@
+version: '3.8'
+
+services:
+  rag-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rag-agent-api
+    ports:
+      - "8000:8000"
+    volumes:
+      # 문서 파일 디렉토리 마운트
+      - /mnt/ssd2/downloads/jmbadpt_20251121/file:/workspace/rag_agent/documents/static:ro
+      # 환경 변수 파일 마운트
+      - ./.env:/workspace/rag_agent/.env:ro
+    environment:
+      # CUDA 관련 환경 변수
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      # Python 환경 변수
+      - PYTHONUNBUFFERED=1
+      # 임베딩 모델 캐시 디렉토리
+      - TRANSFORMERS_CACHE=/workspace/rag_agent/.cache
+      - HF_HOME=/workspace/rag_agent/.cache
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    # 호스트 네트워크 모드 또는 extra_hosts 설정
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - rag-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+networks:
+  rag-network:
+    driver: bridge
+    name: rag-network

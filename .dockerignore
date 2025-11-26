@@ -1,0 +1,49 @@
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+.pytest_cache
+*.egg-info
+dist
+build
+
+# Virtual Environment
+venv
+env
+ENV
+.venv
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Git
+.git
+.gitattributes
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+logs
+
+# Cache
+.cache
+*.cache
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary
+*.tmp
+temp
+tmp
