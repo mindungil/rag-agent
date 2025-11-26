@@ -205,7 +205,7 @@ class RAGService:
             base_with_scheme += '/'
 
         # 다운로드 URL 생성 (프로토콜 포함)
-        download_url = urljoin(base_with_scheme, encoded_filename)
+        download_url = f"{base_with_scheme}{encoded_filename}"
 
         return download_url
 
