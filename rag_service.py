@@ -6,7 +6,7 @@ Qdrant 검색, 임베딩 생성, LLM 답변 생성을 처리합니다.
 import os
 import logging
 from typing import List, Dict, Any
-from urllib.parse import quote
+from urllib.parse import quote, urljoin, urlparse
 
 import torch
 from sentence_transformers import SentenceTransformer
@@ -193,8 +193,19 @@ class RAGService:
         # URL 인코딩
         encoded_filename = quote(filename, safe='')
 
+        parsed_base = urlparse(self.download_base_url)
+        if parsed_base.scheme:
+            base_with_scheme = self.download_base_url
+        else:
+            normalized_base = self.download_base_url.lstrip('/')
+            base_with_scheme = f"http://{normalized_base}"
+
+        # base URL이 슬래시로 끝나지 않는다면 추가
+        if not base_with_scheme.endswith('/'):
+            base_with_scheme += '/'
+
         # 다운로드 URL 생성 (프로토콜 포함)
-        download_url = f"http://{self.download_base_url}{encoded_filename}"
+        download_url = urljoin(base_with_scheme, encoded_filename)
 
         return download_url
 

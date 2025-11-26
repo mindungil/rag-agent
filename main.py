@@ -60,7 +60,10 @@ async def lifespan(app: FastAPI):
             embedding_model=os.getenv("EMBEDDING_MODEL", "intfloat/multilingual-e5-large-instruct"),
             llm_api_url=os.getenv("LLM_API_URL"),
             llm_model=os.getenv("LLM_MODEL"),
-            download_base_url=os.getenv("DOWNLOAD_BASE_URL", "ai.jb.go.kr/files/download?path=documents/static/")
+            download_base_url=os.getenv(
+                "DOWNLOAD_BASE_URL",
+                "https://ai.jb.go.kr/files/download?path=documents/static/"
+            )
         )
         await rag_service.initialize()
         logger.info("RAG 서비스 초기화 완료")
