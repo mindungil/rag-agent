@@ -10,7 +10,7 @@ import json
 from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse, StreamingResponse, FileResponse
+from fastapi.responses import JSONResponse, StreamingResponse, FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 import logging
@@ -56,7 +56,7 @@ async def lifespan(app: FastAPI):
         rag_service = RAGService(
             qdrant_host=os.getenv("QDRANT_HOST", "qdrant-rag"),
             qdrant_grpc_port=int(os.getenv("QDRANT_GRPC_PORT", "6334")),
-            collection_name=os.getenv("COLLECTION_NAME", "v1"),
+            collection_name=os.getenv("COLLECTION_NAME", "v3"),
             embedding_model=os.getenv("EMBEDDING_MODEL", "intfloat/multilingual-e5-large-instruct"),
             llm_api_url=os.getenv("LLM_API_URL"),
             llm_model=os.getenv("LLM_MODEL"),
@@ -133,8 +133,105 @@ app.add_middleware(
     max_age=3600,  # Preflight 캐시 시간 (1시간)
 )
 
-# 정적 파일 서빙 - 문서 다운로드용
-app.mount("/static/documents", StaticFiles(directory="/workspace/rag_agent/documents/static"), name="documents")
+
+# 다운로드 중간 페이지 (Open-WebUI 링크 클릭 시 창이 닫히는 문제 해결)
+@app.get("/download-page/{filename:path}")
+async def download_page(filename: str):
+    """
+    다운로드 중간 페이지 - 새 창에서 열려도 닫히지 않음
+    """
+    from urllib.parse import unquote, quote
+    decoded_filename = unquote(filename)
+    encoded_filename = quote(decoded_filename)
+    download_url = f"/static/documents/{encoded_filename}"
+
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <title>파일 다운로드</title>
+        <style>
+            body {{
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                min-height: 100vh;
+                margin: 0;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+            }}
+            .container {{
+                text-align: center;
+                padding: 40px;
+                background: rgba(255, 255, 255, 0.1);
+                border-radius: 20px;
+                backdrop-filter: blur(10px);
+                box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
+            }}
+            h1 {{ margin: 0 0 20px 0; font-size: 24px; }}
+            .filename {{
+                margin: 20px 0;
+                padding: 15px 25px;
+                background: rgba(255, 255, 255, 0.2);
+                border-radius: 10px;
+                font-weight: bold;
+                word-break: break-all;
+            }}
+            .download-btn {{
+                display: inline-block;
+                margin-top: 20px;
+                padding: 15px 40px;
+                background: white;
+                color: #667eea;
+                text-decoration: none;
+                border-radius: 50px;
+                font-weight: bold;
+                font-size: 16px;
+                transition: all 0.3s;
+                box-shadow: 0 4px 15px 0 rgba(0, 0, 0, 0.2);
+            }}
+            .download-btn:hover {{
+                transform: translateY(-2px);
+                box-shadow: 0 6px 20px 0 rgba(0, 0, 0, 0.3);
+            }}
+            .spinner {{
+                margin: 20px auto;
+                width: 50px;
+                height: 50px;
+                border: 5px solid rgba(255, 255, 255, 0.3);
+                border-top: 5px solid white;
+                border-radius: 50%;
+                animation: spin 1s linear infinite;
+            }}
+            @keyframes spin {{
+                0% {{ transform: rotate(0deg); }}
+                100% {{ transform: rotate(360deg); }}
+            }}
+        </style>
+        <script>
+            window.onload = function() {{
+                // 자동 다운로드 시작
+                setTimeout(function() {{
+                    window.location.href = '{download_url}';
+                }}, 500);
+            }};
+        </script>
+    </head>
+    <body>
+        <div class="container">
+            <h1>📥 파일 다운로드</h1>
+            <div class="spinner"></div>
+            <p>다운로드가 자동으로 시작됩니다...</p>
+            <div class="filename">{decoded_filename}</div>
+            <a href="{download_url}" class="download-btn">다운로드가 시작되지 않으면 클릭하세요</a>
+        </div>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html_content)
 
 
 # 커스텀 파일 다운로드 엔드포인트 (한글 파일명 지원)

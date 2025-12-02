@@ -219,8 +219,13 @@ class RAGService:
             # 메타데이터에서 파일명 및 소스 정보 추출
             metadata = payload.get("metadata", {})
             if isinstance(metadata, dict):
-                filename = metadata.get("filename", f"문서_{idx}")
+                # source 필드에서 실제 파일 경로 추출 (우선순위: source > filename)
                 source = metadata.get("source", "")
+                # source가 있으면 basename 사용, 없으면 filename 사용
+                if source:
+                    filename = os.path.basename(source)
+                else:
+                    filename = metadata.get("filename", f"문서_{idx}")
             else:
                 filename = f"문서_{idx}"
                 source = ""
@@ -237,6 +242,7 @@ class RAGService:
                 seen_files.add(filename)
 
                 # 참조 정보 생성 (파일명과 다운로드 링크만)
+                # source에서 추출한 실제 파일명 사용
                 download_url = self._create_download_url(filename)
 
                 references.append(
