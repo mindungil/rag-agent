@@ -4,8 +4,10 @@ Qdrant 검색, 임베딩 생성, LLM 답변 생성을 처리합니다.
 """
 
 import os
+import json
+import asyncio
 import logging
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from urllib.parse import quote
 
 import torch
@@ -49,6 +51,7 @@ class RAGService:
 
         self.qdrant_client: QdrantClient = None
         self.embedding_model: SentenceTransformer = None
+        self.http_client: httpx.AsyncClient = None
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.embedding_dimension = 1024
 
@@ -90,12 +93,19 @@ class RAGService:
             )
             logger.info(f"임베딩 모델 로드 완료 (device: {self.device})")
 
+            # 공유 HTTP 클라이언트 생성 (커넥션 풀 재사용)
+            self.http_client = httpx.AsyncClient(timeout=120.0)
+            logger.info("HTTP 클라이언트 초기화 완료")
+
         except Exception as e:
             logger.error(f"초기화 실패: {e}")
             raise
 
     async def close(self):
         """리소스 정리"""
+        if self.http_client:
+            await self.http_client.aclose()
+            logger.info("HTTP 클라이언트 종료")
         if self.qdrant_client:
             self.qdrant_client.close()
             logger.info("Qdrant 연결 종료")
@@ -129,7 +139,7 @@ class RAGService:
 
     def _create_query_embedding(self, text: str) -> List[float]:
         """
-        텍스트를 임베딩 벡터로 변환
+        텍스트를 임베딩 벡터로 변환 (동기, CPU/GPU 블로킹)
         - normalize_embeddings=True 사용
         """
         logger.info(f"임베딩 생성 중... (길이: {len(text)} 문자)")
@@ -147,6 +157,13 @@ class RAGService:
 
         logger.info(f"임베딩 생성 완료 (차원: {len(embedding_list)})")
         return embedding_list
+
+    async def _create_query_embedding_async(self, text: str) -> List[float]:
+        """
+        이벤트 루프를 블로킹하지 않는 비동기 임베딩 생성
+        동기 임베딩 함수를 별도 스레드에서 실행합니다.
+        """
+        return await asyncio.to_thread(self._create_query_embedding, text)
 
     async def _search_documents(
         self,
@@ -267,10 +284,12 @@ class RAGService:
         prompt: str,
         context: str,
         temperature: float,
-        max_tokens: int
-    ) -> str:
+        max_tokens: int,
+        chat_history: Optional[List[Dict[str, str]]] = None
+    ) -> Dict[str, Any]:
         """
         OpenAI 호환 API를 호출하여 답변 생성
+        Returns: {"answer": str, "usage": dict}
         """
         logger.info("LLM 답변 생성 중...")
 
@@ -281,32 +300,35 @@ class RAGService:
 
 답변:"""
 
-        # OpenAI 호환 API 호출
+        # 메시지 구성 (대화 기록 포함)
+        messages = [{"role": "system", "content": self.SYSTEM_PROMPT}]
+        if chat_history:
+            messages.extend(chat_history)
+        messages.append({"role": "user", "content": user_prompt})
+
+        # OpenAI 호환 API 호출 (공유 HTTP 클라이언트 사용)
         try:
-            async with httpx.AsyncClient(timeout=120.0) as client:
-                response = await client.post(
-                    f"{self.llm_api_url}/chat/completions",
-                    headers={
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "model": self.llm_model,
-                        "messages": [
-                            {"role": "system", "content": self.SYSTEM_PROMPT},
-                            {"role": "user", "content": user_prompt}
-                        ],
-                        "temperature": temperature,
-                        "max_tokens": max_tokens,
-                        "stream": False
-                    }
-                )
-                response.raise_for_status()
+            response = await self.http_client.post(
+                f"{self.llm_api_url}/chat/completions",
+                headers={
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": self.llm_model,
+                    "messages": messages,
+                    "temperature": temperature,
+                    "max_tokens": max_tokens,
+                    "stream": False
+                }
+            )
+            response.raise_for_status()
 
-                result = response.json()
-                answer = result["choices"][0]["message"]["content"]
+            result = response.json()
+            answer = result["choices"][0]["message"]["content"]
+            usage = result.get("usage", {})
 
-                logger.info(f"답변 생성 완료 (길이: {len(answer)} 문자)")
-                return answer
+            logger.info(f"답변 생성 완료 (길이: {len(answer)} 문자)")
+            return {"answer": answer, "usage": usage}
 
         except httpx.HTTPError as e:
             logger.error(f"LLM API 호출 실패: {e}")
@@ -328,8 +350,8 @@ class RAGService:
         5. 제너레이터 반환
         """
         try:
-            # 1. 질의 임베딩 생성
-            query_embedding = self._create_query_embedding(prompt)
+            # 1. 질의 임베딩 생성 (비동기 - 이벤트 루프 논블로킹)
+            query_embedding = await self._create_query_embedding_async(prompt)
 
             # 2. 유사 문서 검색
             documents = await self._search_documents(query_embedding, top_k)
@@ -359,45 +381,43 @@ class RAGService:
 답변:"""
 
                 try:
-                    async with httpx.AsyncClient(timeout=120.0) as client:
-                        async with client.stream(
-                            "POST",
-                            f"{self.llm_api_url}/chat/completions",
-                            headers={"Content-Type": "application/json"},
-                            json={
-                                "model": self.llm_model,
-                                "messages": [
-                                    {"role": "system", "content": self.SYSTEM_PROMPT},
-                                    {"role": "user", "content": user_prompt}
-                                ],
-                                "temperature": temperature,
-                                "max_tokens": max_tokens,
-                                "stream": True
-                            }
-                        ) as response:
-                            response.raise_for_status()
+                    async with self.http_client.stream(
+                        "POST",
+                        f"{self.llm_api_url}/chat/completions",
+                        headers={"Content-Type": "application/json"},
+                        json={
+                            "model": self.llm_model,
+                            "messages": [
+                                {"role": "system", "content": self.SYSTEM_PROMPT},
+                                {"role": "user", "content": user_prompt}
+                            ],
+                            "temperature": temperature,
+                            "max_tokens": max_tokens,
+                            "stream": True
+                        }
+                    ) as response:
+                        response.raise_for_status()
 
-                            # SSE 형식 파싱
-                            async for line in response.aiter_lines():
-                                if line.startswith("data: "):
-                                    data = line[6:]  # "data: " 제거
+                        # SSE 형식 파싱
+                        async for line in response.aiter_lines():
+                            if line.startswith("data: "):
+                                data = line[6:]  # "data: " 제거
 
-                                    if data.strip() == "[DONE]":
-                                        break
+                                if data.strip() == "[DONE]":
+                                    break
 
-                                    try:
-                                        import json
-                                        chunk_data = json.loads(data)
+                                try:
+                                    chunk_data = json.loads(data)
 
-                                        # delta에서 content 추출
-                                        if "choices" in chunk_data and len(chunk_data["choices"]) > 0:
-                                            delta = chunk_data["choices"][0].get("delta", {})
-                                            content = delta.get("content", "")
+                                    # delta에서 content 추출
+                                    if "choices" in chunk_data and len(chunk_data["choices"]) > 0:
+                                        delta = chunk_data["choices"][0].get("delta", {})
+                                        content = delta.get("content", "")
 
-                                            if content:
-                                                yield content
-                                    except json.JSONDecodeError:
-                                        continue
+                                        if content:
+                                            yield content
+                                except json.JSONDecodeError:
+                                    continue
 
                     logger.info("스트리밍 답변 생성 완료")
 
@@ -420,7 +440,8 @@ class RAGService:
         prompt: str,
         top_k: int = 5,
         temperature: float = 0.7,
-        max_tokens: int = 1024
+        max_tokens: int = 1024,
+        chat_history: Optional[List[Dict[str, str]]] = None
     ) -> Dict[str, Any]:
         """
         전체 RAG 파이프라인 실행
@@ -431,8 +452,8 @@ class RAGService:
         5. 결과 반환
         """
         try:
-            # 1. 질의 임베딩 생성
-            query_embedding = self._create_query_embedding(prompt)
+            # 1. 질의 임베딩 생성 (비동기 - 이벤트 루프 논블로킹)
+            query_embedding = await self._create_query_embedding_async(prompt)
 
             # 2. 유사 문서 검색
             documents = await self._search_documents(query_embedding, top_k)
@@ -448,20 +469,22 @@ class RAGService:
             # 3. 컨텍스트 및 참조 정보 생성
             context, references = self._create_context_from_documents(documents)
 
-            # 4. LLM 답변 생성
-            answer = await self._generate_answer(
+            # 4. LLM 답변 생성 (대화 기록 포함)
+            llm_result = await self._generate_answer(
                 prompt=prompt,
                 context=context,
                 temperature=temperature,
-                max_tokens=max_tokens
+                max_tokens=max_tokens,
+                chat_history=chat_history
             )
 
-            # 5. 결과 반환
+            # 5. 결과 반환 (LLM API의 실제 토큰 사용량 포함)
             return {
-                "answer": answer,
+                "answer": llm_result["answer"],
                 "references": references,
                 "prompt": prompt,
-                "retrieved_count": len(documents)
+                "retrieved_count": len(documents),
+                "usage": llm_result.get("usage", {})
             }
 
         except Exception as e:

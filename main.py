@@ -117,20 +117,16 @@ app.add_middleware(
         "http://ai.jb.go.kr",
         "http://localhost:8080",
         "http://localhost:3000",
-        "*"  # 개발 환경을 위해 모든 출처 허용
     ],
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=[
         "Content-Type",
         "Authorization",
-        "X-API-Key",  # API 키 헤더 명시적 허용
+        "X-API-Key",
         "Accept",
-        "Origin",
-        "X-Requested-With"
     ],
-    expose_headers=["*"],
-    max_age=3600,  # Preflight 캐시 시간 (1시간)
+    max_age=3600,
 )
 
 
@@ -614,20 +610,28 @@ async def chat_completions(
         if request.stream:
             return await chat_completions_streaming(request)
 
-        # 마지막 사용자 메시지 추출
+        # 대화 기록 추출 (마지막 user 메시지 제외한 이전 대화)
         user_messages = [msg for msg in request.messages if msg.role == "user"]
         if not user_messages:
             raise HTTPException(status_code=400, detail="사용자 메시지가 없습니다")
 
         user_query = user_messages[-1].content
-        logger.info(f"Chat Completion 질의 수신: {user_query[:100]}...")
 
-        # RAG 처리
+        # 이전 대화 기록 구성 (마지막 user 메시지 제외)
+        chat_history = []
+        for msg in request.messages[:-1]:  # 마지막 메시지 제외
+            if msg.role in ("user", "assistant"):
+                chat_history.append({"role": msg.role, "content": msg.content})
+
+        logger.info(f"Chat Completion 질의 수신: {user_query[:100]}... (대화 기록: {len(chat_history)}개)")
+
+        # RAG 처리 (대화 기록 포함)
         result = await rag_service.process_query(
             prompt=user_query,
             top_k=request.top_k or 5,
             temperature=request.temperature,
-            max_tokens=request.max_tokens or 1024
+            max_tokens=request.max_tokens or 1024,
+            chat_history=chat_history if chat_history else None
         )
 
         # 응답 메시지 구성: 답변 + 참조 문서 (마크다운 링크 형식)
@@ -646,9 +650,11 @@ async def chat_completions(
             if sources_md.strip() != "참고 문서:":
                 answer_content += sources_md
 
-        # 토큰 수 추정 (간단한 추정)
-        prompt_tokens = len(user_query.split()) * 2
-        completion_tokens = len(answer_content.split()) * 2
+        # LLM API의 실제 토큰 사용량 사용 (없으면 폴백)
+        usage_data = result.get("usage", {})
+        prompt_tokens = usage_data.get("prompt_tokens", len(user_query) // 2)
+        completion_tokens = usage_data.get("completion_tokens", len(answer_content) // 2)
+        total_tokens = usage_data.get("total_tokens", prompt_tokens + completion_tokens)
 
         # OpenAI 호환 응답 생성
         response = ChatCompletionResponse(
@@ -669,7 +675,7 @@ async def chat_completions(
             usage=ChatCompletionUsage(
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
-                total_tokens=prompt_tokens + completion_tokens
+                total_tokens=total_tokens
             )
         )
 

@@ -30,16 +30,20 @@ services:
           devices:
             - driver: nvidia
               count: all
-              capabilities: [gpu]
+              capabilities: [ gpu ]
 
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    network_mode: bridge
+    networks:
+      - rag-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 60s
 
+networks:
+  rag-network:
+    external: true
