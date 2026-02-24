@@ -22,6 +22,13 @@ logger = logging.getLogger(__name__)
 class RAGService:
     """RAG 처리를 위한 서비스 클래스"""
 
+    SYSTEM_PROMPT = """당신은 업무편람 도우미입니다. 제공된 문서를 바탕으로 정확하고 상세한 답변을 제공하세요.
+답변 시 다음 규칙을 따르세요:
+1. 제공된 문서의 내용을 기반으로 답변합니다.
+2. 문서에 없는 내용은 추측하지 않습니다.
+3. 명확하고 구조화된 답변을 제공합니다.
+4. 필요시 번호나 단계를 사용하여 설명합니다."""
+
     def __init__(
         self,
         qdrant_host: str,
@@ -267,14 +274,6 @@ class RAGService:
         """
         logger.info("LLM 답변 생성 중...")
 
-        # 프롬프트 구성
-        system_prompt = """당신은 업무편람 도우미입니다. 제공된 문서를 바탕으로 정확하고 상세한 답변을 제공하세요.
-답변 시 다음 규칙을 따르세요:
-1. 제공된 문서의 내용을 기반으로 답변합니다.
-2. 문서에 없는 내용은 추측하지 않습니다.
-3. 명확하고 구조화된 답변을 제공합니다.
-4. 필요시 번호나 단계를 사용하여 설명합니다."""
-
         user_prompt = f"""참고 문서:
 {context}
 
@@ -293,7 +292,7 @@ class RAGService:
                     json={
                         "model": self.llm_model,
                         "messages": [
-                            {"role": "system", "content": system_prompt},
+                            {"role": "system", "content": self.SYSTEM_PROMPT},
                             {"role": "user", "content": user_prompt}
                         ],
                         "temperature": temperature,
@@ -352,14 +351,6 @@ class RAGService:
             async def stream_generator():
                 logger.info("LLM 스트리밍 답변 생성 중...")
 
-                # 프롬프트 구성
-                system_prompt = """당신은 업무편람 도우미입니다. 제공된 문서를 바탕으로 정확하고 상세한 답변을 제공하세요.
-답변 시 다음 규칙을 따르세요:
-1. 제공된 문서의 내용을 기반으로 답변합니다.
-2. 문서에 없는 내용은 추측하지 않습니다.
-3. 명확하고 구조화된 답변을 제공합니다.
-4. 필요시 번호나 단계를 사용하여 설명합니다."""
-
                 user_prompt = f"""참고 문서:
 {context}
 
@@ -376,7 +367,7 @@ class RAGService:
                             json={
                                 "model": self.llm_model,
                                 "messages": [
-                                    {"role": "system", "content": system_prompt},
+                                    {"role": "system", "content": self.SYSTEM_PROMPT},
                                     {"role": "user", "content": user_prompt}
                                 ],
                                 "temperature": temperature,
