@@ -360,7 +360,8 @@ async def health_check():
 
 @app.post("/query", response_model=QueryResponse)
 async def query(
-    request: QueryRequest
+    request: QueryRequest,
+    api_key: str = Depends(verify_api_key)
 ):
     """
     RAG 기반 질의응답 엔드포인트
@@ -584,7 +585,8 @@ async def chat_completions_streaming(request: ChatCompletionRequest):
 
 @app.post("/v1/chat/completions")
 async def chat_completions(
-    request: ChatCompletionRequest
+    request: ChatCompletionRequest,
+    api_key: str = Depends(verify_api_key)
 ):
     """
     OpenAI 호환 Chat Completion 엔드포인트
