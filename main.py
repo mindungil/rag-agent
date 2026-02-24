@@ -234,18 +234,28 @@ async def download_page(filename: str):
     return HTMLResponse(content=html_content)
 
 
+# 문서 디렉토리 경로 (Path Traversal 방어에 사용)
+DOCUMENTS_DIR = os.path.realpath("/workspace/rag_agent/documents/static")
+
+
 # 커스텀 파일 다운로드 엔드포인트 (한글 파일명 지원)
 @app.api_route("/download/{filename:path}", methods=["GET", "HEAD"])
 async def download_file(filename: str):
     """
     파일 다운로드 엔드포인트
     한글 파일명을 포함한 모든 파일 다운로드 지원
+    Path Traversal 공격 방어 포함
     """
     from urllib.parse import unquote
 
     # URL 디코딩
     decoded_filename = unquote(filename)
-    file_path = os.path.join("/workspace/rag_agent/documents/static/", decoded_filename)
+    file_path = os.path.realpath(os.path.join(DOCUMENTS_DIR, decoded_filename))
+
+    # Path Traversal 방어: 실제 경로가 허용된 디렉토리 내부인지 확인
+    if not file_path.startswith(DOCUMENTS_DIR + os.sep) and file_path != DOCUMENTS_DIR:
+        logger.warning(f"⚠️ Path Traversal 시도 감지: {decoded_filename} → {file_path}")
+        raise HTTPException(status_code=403, detail="접근이 거부되었습니다")
 
     logger.info(f"📥 파일 다운로드 요청: {decoded_filename}")
 
