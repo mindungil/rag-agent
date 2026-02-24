@@ -194,7 +194,7 @@ class RAGService:
         encoded_filename = quote(filename, safe='')
 
         # 다운로드 URL 생성 (프로토콜 포함)
-        download_url = f"http://{self.download_base_url}{encoded_filename}"
+        download_url = f"https://{self.download_base_url}{encoded_filename}"
 
         return download_url
 
